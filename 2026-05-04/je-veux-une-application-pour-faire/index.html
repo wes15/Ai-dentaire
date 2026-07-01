@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmileCraft Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <section class="auth-overlay" id="authOverlay" aria-label="Authentification">
+      <div class="auth-dialog">
+        <div class="auth-brand">
+          <span class="health-mark" aria-hidden="true">+</span>
+          <div>
+            <p class="eyebrow">Plateforme dentaire</p>
+            <h2>SmileCraft</h2>
+          </div>
+        </div>
+        <div class="auth-tabs" role="tablist" aria-label="Acces au compte">
+          <button class="is-active" id="loginTab" type="button">Connexion</button>
+          <button id="registerTab" type="button">Inscription</button>
+        </div>
+        <form id="authForm">
+          <label class="auth-name-field" hidden>
+            <span>Nom complet</span>
+            <input id="authName" name="name" autocomplete="name" />
+          </label>
+          <label>
+            <span>Email</span>
+            <input id="authEmail" name="email" type="email" autocomplete="email" required />
+          </label>
+          <label>
+            <span>Mot de passe</span>
+            <input id="authPassword" name="password" type="password" minlength="8" autocomplete="current-password" required />
+          </label>
+          <p class="form-error" id="authError" role="alert"></p>
+          <button class="primary-command" id="authSubmit" type="submit">Se connecter</button>
+        </form>
+      </div>
+    </section>
+
+    <main class="app-shell">
+      <section class="workspace" aria-label="Espace de traitement">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Studio dentaire visuel</p>
+            <h1>SmileCraft</h1>
+          </div>
+          <div class="actions">
+            <button id="patientsButton" type="button">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M16 11h6"/></svg>
+              </span>
+              Patients
+            </button>
+            <button class="current-patient" id="currentPatientButton" type="button" disabled>
+              Aucun patient
+            </button>
+            <label class="file-button">
+              <input id="imageInput" type="file" accept="image/*" />
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3v12m0-12 4 4m-4-4-4 4"/><path d="M5 14v4a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4"/></svg>
+              </span>
+              Image
+            </label>
+            <button id="exportButton" type="button" disabled>
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 20h14"/></svg>
+              </span>
+              Export
+            </button>
+            <button class="icon-command" id="logoutButton" type="button" title="Deconnexion" aria-label="Deconnexion">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5"/></svg>
+              </span>
+            </button>
+          </div>
+        </header>
+
+        <div class="canvas-stage" id="canvasStage">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-art" aria-hidden="true"></div>
+            <h2>Ajoute une photo du visage ou de la bouche</h2>
+            <p>Le traitement sera appliqué seulement sur les zones sélectionnées.</p>
+          </div>
+          <canvas id="imageCanvas" aria-label="Image de travail"></canvas>
+          <canvas id="maskCanvas" aria-label="Sélection des dents"></canvas>
+          <div class="split-line" id="splitLine" aria-hidden="true"></div>
+          <span class="compare-label compare-before" aria-hidden="true">Apres</span>
+          <span class="compare-label compare-after" aria-hidden="true">Avant</span>
+          <div class="ai-loader" id="aiLoader" hidden aria-live="polite" aria-label="Generation OpenAI en cours">
+            <svg class="hourglass" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 3h12M6 21h12M7 3c0 4 1.8 6.2 5 9-3.2 2.8-5 5-5 9M17 3c0 4-1.8 6.2-5 9 3.2 2.8 5 5 5 9"/>
+              <path class="hourglass-sand" d="M9 7h6l-3 4-3-4Zm0 10 3-4 3 4H9Z"/>
+            </svg>
+            <strong>IA en cours</strong>
+            <span>Generation OpenAI</span>
+          </div>
+        </div>
+
+        <div class="statusbar">
+          <div>
+            <strong id="statusTitle">Prêt</strong>
+            <span id="statusText">Importe une image pour commencer.</span>
+          </div>
+          <div class="zoom-controls" aria-label="Contrôle de vue">
+            <button id="fitButton" type="button" title="Ajuster">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+              </span>
+            </button>
+            <button id="resetButton" type="button" title="Réinitialiser">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 2.34 5.66"/><path d="M4 17v-5h5"/></svg>
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel" aria-label="Réglages">
+        <div class="brand-block">
+          <h2>Traitement</h2>
+          <p>Simulation visuelle, exportable en PNG.</p>
+        </div>
+
+        <section class="control-group">
+          <h3>Mode</h3>
+          <div class="segmented" role="group" aria-label="Mode de travail">
+            <button class="is-active" data-tool="brush" type="button">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M18 3 21 6 9 18H6v-3L18 3Z"/><path d="M5 21c2 0 3-1 3-3"/></svg>
+              </span>
+              Sélection
+            </button>
+            <button data-tool="mouth" type="button">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 8V5h3"/><path d="M17 5h3v3"/><path d="M20 16v3h-3"/><path d="M7 19H4v-3"/><path d="M7 12c1.8 2 3.4 3 5 3s3.2-1 5-3"/><path d="M7 12c1.8-2 3.4-3 5-3s3.2 1 5 3"/></svg>
+              </span>
+              Bouche
+            </button>
+            <button data-tool="toothbox" type="button">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M9 8c1-1 5-1 6 0 1 2 .5 7-1 9-.6.8-1.3.3-2-.8-.7 1.1-1.4 1.6-2 .8-1.5-2-2-7-1-9Z"/></svg>
+              </span>
+              Dent
+            </button>
+            <button data-tool="erase" type="button">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m7 21-4-4L15 5a3 3 0 0 1 4 4L7 21Z"/><path d="M14 6 18 10"/><path d="M9 21h12"/></svg>
+              </span>
+              Retouche
+            </button>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h3>Plan</h3>
+          <div class="treatment-grid" role="radiogroup" aria-label="Type de traitement">
+            <button class="treatment is-active" data-treatment="whitening" type="button">
+              <span>Blanchiment</span>
+              <small>Teinte lumineuse</small>
+            </button>
+            <button class="treatment" data-treatment="veneers" type="button">
+              <span>Facettes</span>
+              <small>Email uniforme</small>
+            </button>
+            <button class="treatment" data-treatment="crown" type="button">
+              <span>Couronne</span>
+              <small>Ceramique complete</small>
+            </button>
+            <button class="treatment" data-treatment="alignment" type="button">
+              <span>Alignement</span>
+              <small>Bords réguliers</small>
+            </button>
+            <button class="treatment" data-treatment="gum" type="button">
+              <span>Gencive</span>
+              <small>Contour doux</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h3>Réglages</h3>
+          <label class="slider-row">
+            <span>Intensité</span>
+            <input id="intensity" type="range" min="0" max="100" value="62" />
+            <output id="intensityValue">62</output>
+          </label>
+          <label class="slider-row">
+            <span>Lissage</span>
+            <input id="softness" type="range" min="0" max="100" value="46" />
+            <output id="softnessValue">46</output>
+          </label>
+          <label class="slider-row">
+            <span>Pinceau</span>
+            <input id="brushSize" type="range" min="8" max="90" value="34" />
+            <output id="brushValue">34</output>
+          </label>
+        </section>
+
+        <section class="control-group">
+          <h3>Affichage</h3>
+          <div class="toggle-row">
+            <label>
+              <input id="maskToggle" type="checkbox" checked />
+              <span>Masque</span>
+            </label>
+            <label>
+              <input id="beforeAfterToggle" type="checkbox" disabled />
+              <span>Comparaison</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h3>Dents</h3>
+          <div class="teeth-map" aria-label="Sélection rapide des dents">
+            <button data-tooth="13" type="button">13</button>
+            <button data-tooth="12" type="button">12</button>
+            <button data-tooth="11" type="button">11</button>
+            <button data-tooth="21" type="button">21</button>
+            <button data-tooth="22" type="button">22</button>
+            <button data-tooth="23" type="button">23</button>
+            <button data-tooth="43" type="button">43</button>
+            <button data-tooth="42" type="button">42</button>
+            <button data-tooth="41" type="button">41</button>
+            <button data-tooth="31" type="button">31</button>
+            <button data-tooth="32" type="button">32</button>
+            <button data-tooth="33" type="button">33</button>
+          </div>
+        </section>
+
+        <section class="control-group">
+          <h3>Commandes</h3>
+          <div class="command-grid">
+            <button id="applyButton" type="button" disabled>
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></svg>
+              </span>
+              Appliquer
+            </button>
+            <button id="aiButton" type="button" disabled>
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 13.8 8.2 19 10 13.8 11.8 12 17 10.2 11.8 5 10 10.2 8.2 12 3Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></svg>
+              </span>
+              IA OpenAI
+            </button>
+            <button id="saveTreatmentButton" type="button" disabled>
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5V3Z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></svg>
+              </span>
+              Dossier patient
+            </button>
+            <button id="clearMaskButton" type="button" disabled>
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/></svg>
+              </span>
+              Effacer
+            </button>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <section class="patient-overlay" id="patientOverlay" hidden aria-label="Gestion des patients">
+      <div class="patient-dialog">
+        <header class="patient-dialog-header">
+          <div>
+            <p class="eyebrow">Dossiers cliniques</p>
+            <h2>Patients</h2>
+          </div>
+          <button class="icon-command" id="closePatientsButton" type="button" title="Fermer" aria-label="Fermer">
+            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></span>
+          </button>
+        </header>
+        <div class="patient-layout">
+          <aside class="patient-list-pane">
+            <div class="patient-list-toolbar">
+              <strong>Mes patients</strong>
+              <button id="newPatientButton" type="button">Nouveau</button>
+            </div>
+            <div class="patient-list" id="patientList"></div>
+          </aside>
+          <div class="patient-detail-pane">
+            <form class="patient-form" id="patientForm">
+              <input id="patientId" type="hidden" />
+              <div class="field-grid">
+                <label><span>Prenom</span><input id="patientFirstName" required /></label>
+                <label><span>Nom</span><input id="patientLastName" required /></label>
+                <label><span>Date de naissance</span><input id="patientBirthDate" type="date" /></label>
+                <label><span>Telephone</span><input id="patientPhone" type="tel" /></label>
+              </div>
+              <label><span>Email</span><input id="patientEmail" type="email" /></label>
+              <label><span>Notes</span><textarea id="patientNotes" rows="3"></textarea></label>
+              <p class="form-error" id="patientError" role="alert"></p>
+              <div class="patient-form-actions">
+                <button class="primary-command" type="submit">Enregistrer</button>
+                <button class="danger-command" id="deletePatientButton" type="button" disabled>Supprimer</button>
+              </div>
+            </form>
+            <section class="history-section">
+              <div class="history-header">
+                <h3>Historique des traitements</h3>
+                <span id="historyCount">0</span>
+              </div>
+              <div class="treatment-history" id="treatmentHistory"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <script src="app.js"></script>
+    <script src="platform.js"></script>
+  </body>
+</html>
