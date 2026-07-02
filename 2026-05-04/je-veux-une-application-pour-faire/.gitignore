@@ -2,4 +2,5 @@ api.txt
 data/
 server.log
 server.err
+server-error.log
 test-*.png

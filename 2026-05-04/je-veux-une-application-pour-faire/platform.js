@@ -28,11 +28,33 @@ const deletePatientButton = document.querySelector("#deletePatientButton");
 const treatmentHistory = document.querySelector("#treatmentHistory");
 const historyCount = document.querySelector("#historyCount");
 const saveTreatmentButton = document.querySelector("#saveTreatmentButton");
+const adminButton = document.querySelector("#adminButton");
+const adminOverlay = document.querySelector("#adminOverlay");
+const closeAdminButton = document.querySelector("#closeAdminButton");
+const refreshAdminButton = document.querySelector("#refreshAdminButton");
+const adminSummary = document.querySelector("#adminSummary");
+const adminClientTable = document.querySelector("#adminClientTable");
+const adminSettingsForm = document.querySelector("#adminSettingsForm");
+const adminApiKey = document.querySelector("#adminApiKey");
+const apiKeyStatus = document.querySelector("#apiKeyStatus");
+const priceTextInput = document.querySelector("#priceTextInput");
+const priceImageInput = document.querySelector("#priceImageInput");
+const priceImageOutput = document.querySelector("#priceImageOutput");
+const priceFallback = document.querySelector("#priceFallback");
+const adminClientForm = document.querySelector("#adminClientForm");
+const adminClientName = document.querySelector("#adminClientName");
+const adminClientEmail = document.querySelector("#adminClientEmail");
+const adminClientPassword = document.querySelector("#adminClientPassword");
+const adminClientError = document.querySelector("#adminClientError");
 
 let authMode = "login";
 let signedInUser = null;
 let patients = [];
 let currentPatient = null;
+
+const updateRoleUi = () => {
+  adminButton.hidden = signedInUser?.role !== "admin";
+};
 
 const api = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -180,6 +202,102 @@ const openPatients = async () => {
   if (!patients.length) resetPatientForm();
 };
 
+const formatNumber = (value) => new Intl.NumberFormat("fr-FR").format(Number(value) || 0);
+const formatUsd = (value) =>
+  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "USD" }).format(
+    Number(value) || 0,
+  );
+
+const renderAdminSummary = (summary) => {
+  adminSummary.replaceChildren();
+  const metrics = [
+    [summary.clients, "Clients"],
+    [summary.patients, "Patients"],
+    [summary.treatments, "Traitements sauvegardes"],
+    [summary.api_calls, "Appels OpenAI"],
+    [formatUsd(summary.estimated_cost_usd), "Cout API estime"],
+  ];
+  metrics.forEach(([value, label]) => {
+    const item = document.createElement("div");
+    item.className = "admin-metric";
+    const strong = document.createElement("strong");
+    strong.textContent = typeof value === "number" ? formatNumber(value) : String(value);
+    const span = document.createElement("span");
+    span.textContent = label;
+    item.append(strong, span);
+    adminSummary.append(item);
+  });
+};
+
+const toggleClientAccess = async (client) => {
+  await api(`/api/admin/clients/${client.id}`, {
+    method: "PUT",
+    body: JSON.stringify({ isActive: !Boolean(client.is_active) }),
+  });
+  await loadAdminDashboard();
+};
+
+const renderAdminClients = (clients) => {
+  adminClientTable.replaceChildren();
+  clients.forEach((client) => {
+    const row = document.createElement("tr");
+    const identityCell = document.createElement("td");
+    const identity = document.createElement("div");
+    identity.className = "client-identity";
+    const name = document.createElement("strong");
+    name.textContent = client.name;
+    const email = document.createElement("small");
+    email.textContent = client.email;
+    identity.append(name, email);
+    identityCell.append(identity);
+    const values = [
+      client.patient_count,
+      client.treatment_count,
+      client.api_calls,
+      formatNumber(client.total_tokens),
+      formatUsd(client.estimated_cost_usd),
+    ];
+    row.append(identityCell);
+    values.forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = String(value);
+      row.append(cell);
+    });
+    const accessCell = document.createElement("td");
+    const access = document.createElement("button");
+    access.type = "button";
+    access.className = "access-toggle";
+    access.classList.toggle("is-active", Boolean(client.is_active));
+    access.textContent = client.is_active ? "Actif" : "Suspendu";
+    access.addEventListener("click", () => toggleClientAccess(client));
+    accessCell.append(access);
+    row.append(accessCell);
+    adminClientTable.append(row);
+  });
+};
+
+const loadAdminDashboard = async () => {
+  const [settings, clientsPayload] = await Promise.all([
+    api("/api/admin/settings"),
+    api("/api/admin/clients"),
+  ]);
+  apiKeyStatus.textContent = settings.apiKeyConfigured
+    ? `Cle configuree (${settings.apiKeySource}${settings.apiKeyLastFour ? `, ...${settings.apiKeyLastFour}` : ""})`
+    : "Aucune cle OpenAI configuree";
+  priceTextInput.value = settings.pricing.textInputPerMillion;
+  priceImageInput.value = settings.pricing.imageInputPerMillion;
+  priceImageOutput.value = settings.pricing.imageOutputPerMillion;
+  priceFallback.value = settings.pricing.fallbackPerTreatment;
+  renderAdminSummary(clientsPayload.summary);
+  renderAdminClients(clientsPayload.clients);
+};
+
+const openAdmin = async () => {
+  if (signedInUser?.role !== "admin") return;
+  adminOverlay.hidden = false;
+  await loadAdminDashboard();
+};
+
 loginTab.addEventListener("click", () => setAuthMode("login"));
 registerTab.addEventListener("click", () => setAuthMode("register"));
 
@@ -197,6 +315,7 @@ authForm.addEventListener("submit", async (event) => {
       }),
     });
     signedInUser = payload.user;
+    updateRoleUi();
     authOverlay.hidden = true;
     authForm.reset();
     await loadPatients();
@@ -211,11 +330,13 @@ authForm.addEventListener("submit", async (event) => {
 logoutButton.addEventListener("click", async () => {
   await api("/api/auth/logout", { method: "POST" }).catch(() => {});
   signedInUser = null;
+  updateRoleUi();
   currentPatient = null;
   patients = [];
   currentPatientButton.disabled = true;
   currentPatientButton.textContent = "Aucun patient";
   patientOverlay.hidden = true;
+  adminOverlay.hidden = true;
   authOverlay.hidden = false;
   updateSaveButton();
 });
@@ -226,6 +347,56 @@ closePatientsButton.addEventListener("click", () => {
   patientOverlay.hidden = true;
 });
 newPatientButton.addEventListener("click", resetPatientForm);
+adminButton.addEventListener("click", openAdmin);
+closeAdminButton.addEventListener("click", () => {
+  adminOverlay.hidden = true;
+});
+refreshAdminButton.addEventListener("click", loadAdminDashboard);
+
+adminSettingsForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submit = adminSettingsForm.querySelector("button[type='submit']");
+  submit.disabled = true;
+  try {
+    await api("/api/admin/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        openaiApiKey: adminApiKey.value,
+        pricing: {
+          textInputPerMillion: Number(priceTextInput.value),
+          imageInputPerMillion: Number(priceImageInput.value),
+          imageOutputPerMillion: Number(priceImageOutput.value),
+          fallbackPerTreatment: Number(priceFallback.value),
+        },
+      }),
+    });
+    adminApiKey.value = "";
+    await loadAdminDashboard();
+  } catch (error) {
+    window.alert(error.message);
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+adminClientForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  adminClientError.textContent = "";
+  try {
+    await api("/api/admin/clients", {
+      method: "POST",
+      body: JSON.stringify({
+        name: adminClientName.value,
+        email: adminClientEmail.value,
+        password: adminClientPassword.value,
+      }),
+    });
+    adminClientForm.reset();
+    await loadAdminDashboard();
+  } catch (error) {
+    adminClientError.textContent = error.message;
+  }
+});
 
 patientForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -298,10 +469,12 @@ const initializePlatform = async () => {
   try {
     const payload = await api("/api/auth/me");
     signedInUser = payload.user;
+    updateRoleUi();
     authOverlay.hidden = true;
     await loadPatients();
   } catch (error) {
     authOverlay.hidden = false;
+    updateRoleUi();
   }
   updateSaveButton();
 };

@@ -1,4 +1,6 @@
 const imageInput = document.querySelector("#imageInput");
+const cameraMouthInput = document.querySelector("#cameraMouthInput");
+const cameraFaceInput = document.querySelector("#cameraFaceInput");
 const exportButton = document.querySelector("#exportButton");
 const applyButton = document.querySelector("#applyButton");
 const aiButton = document.querySelector("#aiButton");
@@ -823,6 +825,12 @@ const selectTooth = (button) => {
 };
 
 imageInput.addEventListener("change", (event) => {
+  loadImageFile(event.target.files[0]);
+});
+cameraMouthInput.addEventListener("change", (event) => {
+  loadImageFile(event.target.files[0]);
+});
+cameraFaceInput.addEventListener("change", (event) => {
   loadImageFile(event.target.files[0]);
 });
 

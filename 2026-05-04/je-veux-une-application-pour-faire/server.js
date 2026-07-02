@@ -107,6 +107,12 @@ const ensureColumn = (table, column, definition) => {
 ensureColumn("users", "role", "TEXT NOT NULL DEFAULT 'client'");
 ensureColumn("users", "is_active", "INTEGER NOT NULL DEFAULT 1");
 
+const adminCount = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get().count;
+const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+if (adminCount === 0 && userCount > 0) {
+  db.exec("UPDATE users SET role = 'admin' WHERE id = (SELECT MIN(id) FROM users)");
+}
+
 db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(new Date().toISOString());
 
 const mimeTypes = {
@@ -118,6 +124,7 @@ const mimeTypes = {
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
 };
+const publicFiles = new Set(["/index.html", "/styles.css", "/app.js", "/platform.js"]);
 
 const readApiKey = () => {
   const encrypted = db.prepare("SELECT value FROM settings WHERE key = 'openai_api_key'").get();
@@ -188,9 +195,91 @@ const setSetting = (key, value) => {
   ).run(key, String(value), new Date().toISOString());
 };
 
-const getNumericSetting = (key) => {
-  const value = Number(getSetting(key, "0"));
-  return Number.isFinite(value) && value >= 0 ? value : 0;
+const migrateLegacyApiKey = () => {
+  const stored = db.prepare("SELECT value FROM settings WHERE key = 'openai_api_key'").get();
+  if (stored?.value || !fs.existsSync(apiKeyPath)) return;
+  const legacyKey = fs.readFileSync(apiKeyPath, "utf8").trim();
+  if (!legacyKey) return;
+  const encrypted = encryptSecret(legacyKey);
+  setSetting("openai_api_key", encrypted);
+  if (decryptSecret(encrypted) !== legacyKey) {
+    db.prepare("DELETE FROM settings WHERE key = 'openai_api_key'").run();
+    throw new Error("La migration de la cle OpenAI a echoue.");
+  }
+  fs.writeFileSync(apiKeyPath, "", "utf8");
+};
+
+migrateLegacyApiKey();
+
+const getNumericSetting = (key, fallback = 0) => {
+  const value = Number(getSetting(key, String(fallback)));
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+
+// Official GPT Image 2 standard rates on 2026-07-02; the admin can override them.
+const defaultPricing = Object.freeze({
+  textInputPerMillion: 5,
+  imageInputPerMillion: 8,
+  imageOutputPerMillion: 30,
+  fallbackPerTreatment: 0,
+});
+
+const getPricingSettings = () => ({
+  textInputPerMillion: getNumericSetting(
+    "price_text_input_per_million",
+    defaultPricing.textInputPerMillion,
+  ),
+  imageInputPerMillion: getNumericSetting(
+    "price_image_input_per_million",
+    defaultPricing.imageInputPerMillion,
+  ),
+  imageOutputPerMillion: getNumericSetting(
+    "price_image_output_per_million",
+    defaultPricing.imageOutputPerMillion,
+  ),
+  fallbackPerTreatment: getNumericSetting(
+    "price_fallback_per_treatment",
+    defaultPricing.fallbackPerTreatment,
+  ),
+});
+
+const estimateUsageCost = (usage = {}) => {
+  const pricing = getPricingSettings();
+  const textInput = Number(usage.input_tokens_details?.text_tokens || 0);
+  const imageInput = Number(usage.input_tokens_details?.image_tokens || 0);
+  const output = Number(usage.output_tokens || 0);
+  const tokenCost =
+    (textInput * pricing.textInputPerMillion +
+      imageInput * pricing.imageInputPerMillion +
+      output * pricing.imageOutputPerMillion) /
+    1_000_000;
+  return tokenCost > 0 ? tokenCost : pricing.fallbackPerTreatment;
+};
+
+const recordApiUsage = ({ userId, model, treatmentType, usage, status, errorMessage }) => {
+  const details = usage?.input_tokens_details || {};
+  const estimatedCost = status === "success" ? estimateUsageCost(usage) : 0;
+  db.prepare(
+    `INSERT INTO api_usage
+     (user_id, model, operation, treatment_type, input_tokens, text_input_tokens,
+      image_input_tokens, output_tokens, total_tokens, estimated_cost_usd,
+      status, error_message, created_at)
+     VALUES (?, ?, 'image.edit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    userId,
+    model,
+    treatmentType || null,
+    Number(usage?.input_tokens || 0),
+    Number(details.text_tokens || 0),
+    Number(details.image_tokens || 0),
+    Number(usage?.output_tokens || 0),
+    Number(usage?.total_tokens || 0),
+    estimatedCost,
+    status,
+    errorMessage ? cleanText(errorMessage, 1000) : null,
+    new Date().toISOString(),
+  );
+  return estimatedCost;
 };
 
 const SESSION_COOKIE = "smilecraft_session";
@@ -577,7 +666,147 @@ const handleTreatmentImage = (request, response, user, treatmentId, kind) => {
   });
 };
 
-const handleAiTreatment = async (request, response) => {
+const handleAdminSettings = async (request, response) => {
+  if (request.method === "GET") {
+    const stored = db.prepare("SELECT value FROM settings WHERE key = 'openai_api_key'").get();
+    let lastFour = "";
+    if (stored?.value) {
+      try {
+        lastFour = decryptSecret(stored.value).slice(-4);
+      } catch {}
+    }
+    sendJson(response, 200, {
+      apiKeyConfigured: Boolean(stored?.value || process.env.OPENAI_API_KEY || readApiKey()),
+      apiKeySource: stored?.value ? "database" : process.env.OPENAI_API_KEY ? "environment" : "file",
+      apiKeyLastFour: lastFour,
+      pricing: getPricingSettings(),
+    });
+    return;
+  }
+
+  if (request.method === "PUT") {
+    const body = await parseJsonBody(request);
+    const apiKey = String(body.openaiApiKey || "").trim();
+    if (apiKey) setSetting("openai_api_key", encryptSecret(apiKey));
+    if (body.removeApiKey === true) {
+      db.prepare("DELETE FROM settings WHERE key = 'openai_api_key'").run();
+    }
+    const pricing = body.pricing || {};
+    const values = {
+      price_text_input_per_million: pricing.textInputPerMillion,
+      price_image_input_per_million: pricing.imageInputPerMillion,
+      price_image_output_per_million: pricing.imageOutputPerMillion,
+      price_fallback_per_treatment: pricing.fallbackPerTreatment,
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      const number = Number(value);
+      if (Number.isFinite(number) && number >= 0) setSetting(key, number);
+    });
+    sendJson(response, 200, { ok: true, pricing: getPricingSettings() });
+    return;
+  }
+
+  sendJson(response, 405, { error: "Methode non autorisee." });
+};
+
+const handleAdminClients = async (request, response) => {
+  if (request.method === "GET") {
+    const clients = db
+      .prepare(
+        `SELECT u.id, u.name, u.email, u.is_active, u.created_at,
+          (SELECT COUNT(*) FROM patients p WHERE p.user_id = u.id) AS patient_count,
+          (SELECT COUNT(*) FROM treatments t WHERE t.user_id = u.id) AS treatment_count,
+          (SELECT COUNT(*) FROM api_usage a WHERE a.user_id = u.id AND a.status = 'success') AS api_calls,
+          (SELECT COALESCE(SUM(a.total_tokens), 0) FROM api_usage a WHERE a.user_id = u.id) AS total_tokens,
+          (SELECT COALESCE(SUM(a.estimated_cost_usd), 0) FROM api_usage a WHERE a.user_id = u.id) AS estimated_cost_usd
+         FROM users u WHERE u.role = 'client' ORDER BY u.created_at DESC`,
+      )
+      .all();
+    const summary = db
+      .prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM users WHERE role = 'client') AS clients,
+          (SELECT COUNT(*) FROM patients) AS patients,
+          (SELECT COUNT(*) FROM treatments) AS treatments,
+          (SELECT COUNT(*) FROM api_usage WHERE status = 'success') AS api_calls,
+          (SELECT COALESCE(SUM(total_tokens), 0) FROM api_usage) AS total_tokens,
+          (SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM api_usage) AS estimated_cost_usd`,
+      )
+      .get();
+    sendJson(response, 200, { clients, summary });
+    return;
+  }
+
+  if (request.method === "POST") {
+    const body = await parseJsonBody(request);
+    const name = cleanText(body.name, 80);
+    const email = cleanText(body.email, 160).toLowerCase();
+    const password = String(body.password || "");
+    if (!name || !email.includes("@") || password.length < 8) {
+      sendJson(response, 400, { error: "Nom, email et mot de passe de 8 caracteres requis." });
+      return;
+    }
+    const salt = crypto.randomBytes(16).toString("hex");
+    try {
+      const result = db
+        .prepare(
+          `INSERT INTO users (name, email, password_hash, password_salt, role, created_at)
+           VALUES (?, ?, ?, ?, 'client', ?)`,
+        )
+        .run(name, email, hashPassword(password, salt), salt, new Date().toISOString());
+      sendJson(response, 201, {
+        client: { id: Number(result.lastInsertRowid), name, email, is_active: 1 },
+      });
+    } catch (error) {
+      if (String(error.message).includes("UNIQUE")) {
+        sendJson(response, 409, { error: "Cet email est deja utilise." });
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
+  sendJson(response, 405, { error: "Methode non autorisee." });
+};
+
+const handleAdminClientById = async (request, response, clientId) => {
+  const client = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'client'").get(clientId);
+  if (!client) {
+    sendJson(response, 404, { error: "Client introuvable." });
+    return;
+  }
+  if (request.method === "PUT") {
+    const body = await parseJsonBody(request);
+    const isActive = body.isActive === false ? 0 : 1;
+    db.prepare("UPDATE users SET is_active = ? WHERE id = ? AND role = 'client'").run(
+      isActive,
+      clientId,
+    );
+    if (!isActive) db.prepare("DELETE FROM sessions WHERE user_id = ?").run(clientId);
+    sendJson(response, 200, { ok: true, isActive: Boolean(isActive) });
+    return;
+  }
+  sendJson(response, 405, { error: "Methode non autorisee." });
+};
+
+const handleAdminUsage = (request, response, url) => {
+  const days = Math.max(1, Math.min(365, Number(url.searchParams.get("days")) || 30));
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const daily = db
+    .prepare(
+      `SELECT substr(created_at, 1, 10) AS day,
+       COUNT(*) AS calls, COALESCE(SUM(total_tokens), 0) AS tokens,
+       COALESCE(SUM(estimated_cost_usd), 0) AS cost_usd
+       FROM api_usage WHERE created_at >= ? GROUP BY day ORDER BY day`,
+    )
+    .all(since);
+  sendJson(response, 200, { days, daily });
+};
+
+const handleAiTreatment = async (request, response, user) => {
+  const model = "gpt-image-2";
+  let body = {};
   try {
     const apiKey = readApiKey();
     if (!apiKey) {
@@ -587,7 +816,7 @@ const handleAiTreatment = async (request, response) => {
       return;
     }
 
-    const body = JSON.parse(await readBody(request));
+    body = JSON.parse(await readBody(request));
     if (!body.image || (!body.mask && !body.automaticDetection)) {
       sendJson(response, 400, { error: "Image obligatoire; masque requis hors detection automatique." });
       return;
@@ -617,7 +846,7 @@ const handleAiTreatment = async (request, response) => {
       : "The transparent mask is the only editable region. Preserve every unmasked pixel exactly.";
     const prompt = `${promptBase} ${toothTarget} ${singleCrownRule} ${detectionRule} Treatment strength: ${body.intensity || 60}/100. Do not add text, watermarks, tools, braces, or new objects. This is a visual dental simulation, not a medical diagnosis.`;
     const form = new FormData();
-    form.append("model", "gpt-image-2");
+    form.append("model", model);
     form.append("image", dataUrlToBlob(body.image), "smile-source.png");
     if (body.mask) {
       form.append("mask", dataUrlToBlob(body.mask), "smile-mask.png");
@@ -635,6 +864,13 @@ const handleAiTreatment = async (request, response) => {
 
     const apiPayload = await apiResponse.json();
     if (!apiResponse.ok) {
+      recordApiUsage({
+        userId: user.id,
+        model,
+        treatmentType: body.treatment,
+        status: "error",
+        errorMessage: apiPayload.error?.message,
+      });
       sendJson(response, apiResponse.status, {
         error: apiPayload.error?.message || "OpenAI a refuse la generation.",
       });
@@ -643,12 +879,37 @@ const handleAiTreatment = async (request, response) => {
 
     const b64 = apiPayload.data?.[0]?.b64_json;
     if (!b64) {
+      recordApiUsage({
+        userId: user.id,
+        model,
+        treatmentType: body.treatment,
+        status: "error",
+        errorMessage: "OpenAI n'a pas renvoye d'image.",
+      });
       sendJson(response, 502, { error: "OpenAI n'a pas renvoye d'image." });
       return;
     }
 
-    sendJson(response, 200, { image: `data:image/png;base64,${b64}` });
+    const estimatedCostUsd = recordApiUsage({
+      userId: user.id,
+      model,
+      treatmentType: body.treatment,
+      usage: apiPayload.usage,
+      status: "success",
+    });
+    sendJson(response, 200, {
+      image: `data:image/png;base64,${b64}`,
+      usage: apiPayload.usage || null,
+      estimatedCostUsd,
+    });
   } catch (error) {
+    recordApiUsage({
+      userId: user.id,
+      model,
+      treatmentType: body.treatment,
+      status: "error",
+      errorMessage: error.message,
+    });
     sendJson(response, 500, { error: error.message || "Erreur serveur." });
   }
 };
@@ -675,6 +936,30 @@ const handleApi = async (request, response, url) => {
       sendJson(response, 200, { user });
       return;
     }
+
+    if (url.pathname.startsWith("/api/admin/")) {
+      if (user.role !== "admin") {
+        sendJson(response, 403, { error: "Acces administrateur requis." });
+        return;
+      }
+      if (url.pathname === "/api/admin/settings") {
+        await handleAdminSettings(request, response);
+        return;
+      }
+      if (url.pathname === "/api/admin/clients") {
+        await handleAdminClients(request, response);
+        return;
+      }
+      const adminClientMatch = url.pathname.match(/^\/api\/admin\/clients\/(\d+)$/);
+      if (adminClientMatch) {
+        await handleAdminClientById(request, response, Number(adminClientMatch[1]));
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/admin/usage") {
+        handleAdminUsage(request, response, url);
+        return;
+      }
+    }
     if (url.pathname === "/api/patients") {
       await handlePatients(request, response, user);
       return;
@@ -699,7 +984,7 @@ const handleApi = async (request, response, url) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/treat-smile") {
-      await handleAiTreatment(request, response);
+      await handleAiTreatment(request, response, user);
       return;
     }
 
@@ -712,14 +997,14 @@ const handleApi = async (request, response, url) => {
 const serveStatic = (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host}`);
   const pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+  if (!publicFiles.has(pathname)) {
+    response.writeHead(404);
+    response.end("Not found");
+    return;
+  }
   const filePath = path.normalize(path.join(root, pathname));
 
-  if (
-    !filePath.startsWith(root) ||
-    path.basename(filePath) === "api.txt" ||
-    filePath === dataDir ||
-    filePath.startsWith(`${dataDir}${path.sep}`)
-  ) {
+  if (!filePath.startsWith(root)) {
     response.writeHead(403);
     response.end("Forbidden");
     return;

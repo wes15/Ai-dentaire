@@ -53,6 +53,12 @@
               </span>
               Patients
             </button>
+            <button id="adminButton" type="button" hidden>
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 5 3.4 8.5 8 9 4.6-.5 8-4 8-9V7l-8-4Z"/><path d="M9 12h6M12 9v6"/></svg>
+              </span>
+              Admin
+            </button>
             <button class="current-patient" id="currentPatientButton" type="button" disabled>
               Aucun patient
             </button>
@@ -62,6 +68,20 @@
                 <svg viewBox="0 0 24 24"><path d="M12 3v12m0-12 4 4m-4-4-4 4"/><path d="M5 14v4a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4"/></svg>
               </span>
               Image
+            </label>
+            <label class="file-button camera-button">
+              <input id="cameraMouthInput" type="file" accept="image/*" capture="environment" />
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 7h4l2-3h4l2 3h4v13H4V7Z"/><circle cx="12" cy="13" r="4"/></svg>
+              </span>
+              Photo bouche
+            </label>
+            <label class="file-button camera-button">
+              <input id="cameraFaceInput" type="file" accept="image/*" capture="user" />
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 7h4l2-3h4l2 3h4v13H4V7Z"/><circle cx="12" cy="13" r="4"/></svg>
+              </span>
+              Photo visage
             </label>
             <button id="exportButton" type="button" disabled>
               <span class="icon" aria-hidden="true">
@@ -307,6 +327,55 @@
               <div class="treatment-history" id="treatmentHistory"></div>
             </section>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="admin-overlay" id="adminOverlay" hidden aria-label="Administration commerciale">
+      <div class="admin-dialog">
+        <header class="patient-dialog-header">
+          <div><p class="eyebrow">Administration</p><h2>Activite commerciale</h2></div>
+          <button class="icon-command" id="closeAdminButton" type="button" aria-label="Fermer">
+            <span class="icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></span>
+          </button>
+        </header>
+        <div class="admin-content">
+          <section class="admin-summary" id="adminSummary"></section>
+          <div class="admin-columns">
+            <section class="admin-section">
+              <h3>Configuration OpenAI</h3>
+              <form id="adminSettingsForm" class="patient-form">
+                <label><span>Nouvelle cle API</span><input id="adminApiKey" type="password" autocomplete="off" placeholder="Laisser vide pour conserver la cle" /></label>
+                <small id="apiKeyStatus"></small>
+                <div class="field-grid">
+                  <label><span>Texte / 1M tokens ($)</span><input id="priceTextInput" type="number" min="0" step="0.0001" /></label>
+                  <label><span>Image entree / 1M ($)</span><input id="priceImageInput" type="number" min="0" step="0.0001" /></label>
+                  <label><span>Image sortie / 1M ($)</span><input id="priceImageOutput" type="number" min="0" step="0.0001" /></label>
+                  <label><span>Cout forfaitaire secours ($)</span><input id="priceFallback" type="number" min="0" step="0.0001" /></label>
+                </div>
+                <button class="primary-command" type="submit">Enregistrer les parametres</button>
+              </form>
+            </section>
+            <section class="admin-section">
+              <h3>Ajouter un client</h3>
+              <form id="adminClientForm" class="patient-form">
+                <label><span>Nom</span><input id="adminClientName" required /></label>
+                <label><span>Email</span><input id="adminClientEmail" type="email" required /></label>
+                <label><span>Mot de passe temporaire</span><input id="adminClientPassword" type="password" minlength="8" required /></label>
+                <p class="form-error" id="adminClientError"></p>
+                <button class="primary-command" type="submit">Creer le client</button>
+              </form>
+            </section>
+          </div>
+          <section class="admin-section">
+            <div class="history-header"><h3>Clients et consommation</h3><button id="refreshAdminButton" type="button">Actualiser</button></div>
+            <div class="client-table-wrap">
+              <table class="client-table">
+                <thead><tr><th>Client</th><th>Patients</th><th>Traitements</th><th>Appels API</th><th>Tokens</th><th>Cout estime</th><th>Acces</th></tr></thead>
+                <tbody id="adminClientTable"></tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </div>
     </section>

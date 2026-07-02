@@ -4,6 +4,6 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check server.js"
+    "check": "node --check app.js && node --check platform.js && node --check server.js"
   }
 }
